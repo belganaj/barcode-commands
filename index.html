@@ -10,7 +10,7 @@
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script><script src="https://unpkg.com/html5-qrcode"></script><script>
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-const API="https://script.google.com/macros/s/AKfycbylzGsRgy7bR1kZUzcl85r40oi8rh2-y12CRlBpPvpRfn4e4YKuZ4DSE5QGqlJUbl_s/exec",KEY="barcode_commands_v8";let ms=JSON.parse(localStorage.getItem(KEY)||"[]"),cur=null,scanner=null;
+const API="https://script.google.com/macros/s/AKfycbylzGsRgy7bR1kZUzcl85r40oi8rh2-y12CRlBpPvpRfn4e4YKuZ4DSE5QGqlJUbl_s/exec",KEY="barcode_commands_v9";let ms=JSON.parse(localStorage.getItem(KEY)||"[]"),cur=null,scanner=null;
 const $=x=>document.getElementById(x),esc=x=>String(x??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 function save(){localStorage.setItem(KEY,JSON.stringify(ms))}function msg(id,t,c){$(id).innerHTML=t?`<div class="status ${c}">${t}</div>`:""}
 function beep(type){try{let C=AudioContext||webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=type=="good"?880:type=="repeat"?520:220;g.gain.value=.0001;o.connect(g);g.connect(c.destination);g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+(type=="good"?.28:.45));o.start();o.stop(c.currentTime+(type=="good"?.3:.48));if(type=="good")setTimeout(()=>{let x=c.createOscillator(),y=c.createGain();x.frequency.value=1175;y.gain.value=.12;x.connect(y);y.connect(c.destination);x.start();x.stop(c.currentTime+.16)},130)}catch(e){}}
@@ -46,7 +46,6 @@ async function pdftext(data){
   for(let i=1;i<=p.numPages;i++){
     let page=await p.getPage(i);
     let c=await page.getTextContent();
-    // ترتيب النصوص حسب إحداثياتها لضمان عدم تداخل الأسطر
     let items = c.items.map(x => ({str: x.str, y: Math.round(x.transform[5]), x: Math.round(x.transform[4])}));
     items.sort((a, b) => b.y - a.y || a.x - b.x);
     t += " " + items.map(x => x.str).join(" ");
@@ -55,48 +54,43 @@ async function pdftext(data){
 }
 
 function parse(t){
-  let z=[...t.matchAll(/\bS[A-Z0-9]{7,10}T\b/g)],out=[],seen=new Set();
+  // نمط بحث أكثر شمولاً لالتقاط كافة أنواع أكواد التتبع التي تبدأ بحرف S وتتكون من رموز وأرقام
+  let z=[...t.matchAll(/\bS[A-Z0-9]{6,12}\b/g)],out=[],seen=new Set();
   for(let i=0;i<z.length;i++){
     let bc=z[i][0];
     if(seen.has(bc))continue;
     seen.add(bc);
     let s=t.slice(z[i].index+bc.length,i+1<z.length?z[i+1].index:t.length).replace(/\s+/g," ").trim();
     
-    // استخراج رقم الهاتف (يبدأ بـ 0 أو +212 ويتكون من 10 أرقام)
     let phMatch = s.match(/(?:0|\+212)\s*[5-7](?:\s*\d){8}/);
     let ph = phMatch ? phMatch[0].replace(/\s/g,"") : "";
     
-    // استخراج المدينة بدقة
     let cities = ["Tiznit","Agadir","Tata","Guelmim","Marrakech","Casablanca","Rabat","Meknes","Fes","Oujda","Essaouira","Taroudant","Inezgane","Ait Melloul","Sidi Ifni","Mirleft"];
     let city = cities.find(c => new RegExp("\\b"+c+"\\b","i").test(s)) || "";
     
-    // استخراج السعر (رقم يحتوي على فاصلة أو نقطة وغالباً يتبعها كمية مثل 1 أو 2)
     let priceMatch = s.match(/(\d{1,5}[.,]\d{2})\s+\d/);
     let price = priceMatch ? priceMatch[1] : ((s.match(/(?:^|\s)(\d{1,4}[.,]\d{2})(?:\s|$)/) || [])[1] || "");
 
-    // استخراج الحالة (Status)
     let statusMatch = s.match(/En cours de dispatch|Livré|Retour|Annulé/i);
     let status = statusMatch ? statusMatch[0] : "";
 
-    // استخراج الاسم (الكلمات العربية في النص)
     let arWords = s.split(/\s+/).filter(x => /[\u0600-\u06FF]/.test(x));
     let name = arWords.length > 0 ? arWords.slice(-2).join(" ") : "";
 
-    // استخراج تفاصيل المنتج والكمية (Designation & Quantity)
     let product = s.replace(bc, "").replace(ph, "").replace(city, "").replace(price, "").replace(status, "").replace(name, "").replace(/\s+/g, " ").trim();
     if(product.length > 80) product = product.slice(0, 80);
 
     out.push({
-      barcode: bc,                                    // 1. Tracking
-      type: "TLN",                                    // 2. Type (افتراضي أو مستخرج)
-      store: "OSOGOLD",                               // 3. Store (افتراضي أو مستخرج)
-      product: product,                               // 4. Designation & Quantity
-      price: price,                                   // 5. Price
-      address: s.slice(0, 100),                       // 6. Address
-      city: city,                                     // 7. City
-      name: name,                                     // 8. Name
-      phone: ph,                                      // 9. Phone
-      status: status,                                 // 10. Status
+      barcode: bc,
+      type: "TLN",
+      store: "OSOGOLD",
+      product: product,
+      price: price,
+      address: s.slice(0, 100),
+      city: city,
+      name: name,
+      phone: ph,
+      status: status,
       received: false,
       receivedAt: ""
     });

@@ -10,10 +10,62 @@
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script><script src="https://unpkg.com/html5-qrcode"></script><script>
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-const API="https://script.google.com/macros/s/AKfycbylzGsRgy7bR1kZUzcl85r40oi8rh2-y12CRlBpPvpRfn4e4YKuZ4DSE5QGqlJUbl_s/exec",KEY="barcode_commands_v9";let ms=JSON.parse(localStorage.getItem(KEY)||"[]"),cur=null,scanner=null;
+const API="https://script.google.com/macros/s/AKfycbylzGsRgy7bR1kZUzcl85r40oi8rh2-y12CRlBpPvpRfn4e4YKuZ4DSE5QGqlJUbl_s/exec",KEY="barcode_commands_v10";let ms=JSON.parse(localStorage.getItem(KEY)||"[]"),cur=null,scanner=null;
 const $=x=>document.getElementById(x),esc=x=>String(x??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 function save(){localStorage.setItem(KEY,JSON.stringify(ms))}function msg(id,t,c){$(id).innerHTML=t?`<div class="status ${c}">${t}</div>`:""}
-function beep(type){try{let C=AudioContext||webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=type=="good"?880:type=="repeat"?520:220;g.gain.value=.0001;o.connect(g);g.connect(c.destination);g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+(type=="good"?.28:.45));o.start();o.stop(c.currentTime+(type=="good"?.3:.48));if(type=="good")setTimeout(()=>{let x=c.createOscillator(),y=c.createGain();x.frequency.value=1175;y.gain.value=.12;x.connect(y);y.connect(c.destination);x.start();x.stop(c.currentTime+.16)},130)}catch(e){}}
+
+// نظام إصدار الأصوات عبر Web Audio API مع دعم فتح السياق التلقائي
+let audioCtx = null;
+function getAudioContext() {
+  if (!audioCtx) {
+    let AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) audioCtx = new AudioContextClass();
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+function beep(type) {
+  try {
+    let ctx = getAudioContext();
+    if (!ctx) return;
+    let osc = ctx.createOscillator();
+    let gain = ctx.createGain();
+    
+    if (type === "good") {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // نغمة أولية
+      osc.frequency.setValueAtTime(1320, ctx.currentTime + 0.1); // صعود النغمة لتأكيد النجاح
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } else if (type === "repeat") {
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } else { // error
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    }
+  } catch(e) { console.log(e); }
+}
+
 function history(){let s=$("man");s.innerHTML='<option value="">اختر Manifest</option>';ms.forEach(m=>{let o=document.createElement("option");o.value=m.id;o.textContent=m.fileName+" — "+m.orders.length+" طلب";s.appendChild(o)})}
 
 function render(){
@@ -38,7 +90,15 @@ function render(){
   `).join("");
 }
 
-window.toggle=e=>{let o=cur.orders.find(x=>x.barcode==decodeURIComponent(e));o.received=!o.received;o.receivedAt=o.received?new Date().toISOString():"";if(o.received)beep("good");save();render();sync(o)}
+window.toggle=e=>{
+  getAudioContext(); // تفاعل الصوت
+  let o=cur.orders.find(x=>x.barcode==decodeURIComponent(e));
+  o.received=!o.received;
+  o.receivedAt=o.received?new Date().toISOString():"";
+  if(o.received) beep("good");
+  save(); render(); sync(o);
+}
+
 function sync(o){if(API.startsWith("PASTE_"))return;fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"receipt",manifestId:cur.id,barcode:o.barcode,received:o.received,receivedAt:o.receivedAt})}).catch(()=>{})}
 
 async function pdftext(data){
@@ -47,14 +107,13 @@ async function pdftext(data){
     let page=await p.getPage(i);
     let c=await page.getTextContent();
     let items = c.items.map(x => ({str: x.str, y: Math.round(x.transform[5]), x: Math.round(x.transform[4])}));
-    items.sort((a, b) => b.y - a.y || a.x - b.x);
+    items.sort((a, b) => b.y - b.y || a.x - b.x);
     t += " " + items.map(x => x.str).join(" ");
   }
   return t;
 }
 
 function parse(t){
-  // نمط بحث أكثر شمولاً لالتقاط كافة أنواع أكواد التتبع التي تبدأ بحرف S وتتكون من رموز وأرقام
   let z=[...t.matchAll(/\bS[A-Z0-9]{6,12}\b/g)],out=[],seen=new Set();
   for(let i=0;i<z.length;i++){
     let bc=z[i][0];
@@ -81,26 +140,41 @@ function parse(t){
     if(product.length > 80) product = product.slice(0, 80);
 
     out.push({
-      barcode: bc,
-      type: "TLN",
-      store: "OSOGOLD",
-      product: product,
-      price: price,
-      address: s.slice(0, 100),
-      city: city,
-      name: name,
-      phone: ph,
-      status: status,
-      received: false,
-      receivedAt: ""
+      barcode: bc, type: "TLN", store: "OSOGOLD", product: product, price: price,
+      address: s.slice(0, 100), city: city, name: name, phone: ph, status: status,
+      received: false, receivedAt: ""
     });
   }
   return out;
 }
 
-$("pdf").onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let orders=parse(await pdftext(await f.arrayBuffer()));if(!orders.length)throw Error("لم يتم العثور على Tracking");cur={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),fileName:f.name,uploadedAt:new Date().toISOString(),orders};ms.unshift(cur);save();history();$("man").value=cur.id;render();msg("imp","تم استيراد "+orders.length+" طلب.","ok");if(!API.startsWith("PASTE_"))fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"import",manifest:cur})})}catch(e){msg("imp",esc(e.message),"err")}};
-$("man").onchange=()=>{cur=ms.find(x=>x.id==$("man").value)||null;render()};$("search").oninput=render;$("refresh").onclick=history;
-$("scan").onclick=async()=>{if(scanner){await scanner.stop().catch(()=>{});scanner=null;$("reader").innerHTML="";$("scan").textContent="📷 مسح الباركود";return}scanner=new Html5Qrcode("reader");try{await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:140}},scanCode,()=>{});$("scan").textContent="⏹ إيقاف الكاميرا"}catch(e){scanner=null;msg("scanmsg","تعذر تشغيل الكاميرا. استخدم HTTPS واسمح بالكاميرا.","err")}};
-function scanCode(code){let bc=String(code).trim().toUpperCase();if(scanner){scanner.stop().catch(()=>{});scanner=null;$("reader").innerHTML="";$("scan").textContent="📷 مسح الباركود"}if(!cur){beep("error");msg("scanmsg","اختر Manifest أولاً.","err");return}let o=cur.orders.find(x=>x.barcode.toUpperCase()==bc);if(!o){beep("error");msg("scanmsg","❌ الباركود <b>"+esc(bc)+"</b> غير موجود.","err");return}if(o.received){beep("repeat");msg("scanmsg","⚠️ هذا الطلب تم تسجيله مسبقاً كمستلم.","warn");return}o.received=true;o.receivedAt=new Date().toISOString();save();sync(o);render();beep("good");msg("scanmsg","✅ تم التوصل بالطلب <b>"+esc(bc)+"</b>","ok")}
+$("pdf").onchange=async e=>{getAudioContext(); let f=e.target.files[0];if(!f)return;try{let orders=parse(await pdftext(await f.arrayBuffer()));if(!orders.length)throw Error("لم يتم العثور على Tracking");cur={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),fileName:f.name,uploadedAt:new Date().toISOString(),orders};ms.unshift(cur);save();history();$("man").value=cur.id;render();msg("imp","تم استيراد "+orders.length+" طلب.","ok");if(!API.startsWith("PASTE_"))fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"import",manifest:cur})})}catch(e){msg("imp",esc(e.message),"err")}};
+$("man").onchange=()=>{getAudioContext(); cur=ms.find(x=>x.id==$("man").value)||null;render()};$("search").oninput=render;$("refresh").onclick=history;
+
+$("scan").onclick=async()=>{
+  getAudioContext();
+  if(scanner){await scanner.stop().catch(()=>{});scanner=null;$("reader").innerHTML="";$("scan").textContent="📷 مسح الباركود";return}
+  scanner=new Html5Qrcode("reader");
+  try{
+    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:140}},scanCode,()=>{});
+    $("scan").textContent="⏹ إيقاف الكاميرا";
+  }catch(e){scanner=null;msg("scanmsg","تعذر تشغيل الكاميرا. استخدم HTTPS واسمح بالكاميرا.","err")}
+};
+
+function scanCode(code){
+  getAudioContext();
+  let bc=String(code).trim().toUpperCase();
+  if(scanner){scanner.stop().catch(()=>{});scanner=null;$("reader").innerHTML="";$("scan").textContent="📷 مسح الباركود";}
+  if(!cur){beep("error");msg("scanmsg","اختر Manifest أولاً.","err");return;}
+  let o=cur.orders.find(x=>x.barcode.toUpperCase()==bc);
+  if(!o){beep("error");msg("scanmsg","❌ الباركود <b>"+esc(bc)+"</b> غير موجود.","err");return;}
+  if(o.received){beep("repeat");msg("scanmsg","⚠️ هذا الطلب تم تسجيله مسبقاً كمستلم.","warn");return;}
+  o.received=true;
+  o.receivedAt=new Date().toISOString();
+  save(); sync(o); render();
+  beep("good");
+  msg("scanmsg","✅ تم التوصل بالطلب <b>"+esc(bc)+"</b>","ok");
+}
+
 history();render();
 </script></body></html>

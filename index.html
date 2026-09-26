@@ -4,20 +4,75 @@
 <div class="card"><div class="row"><label class="file">📄 استيراد PDF<input id="pdf" type="file" accept="application/pdf" hidden></label><select id="man"><option value="">اختر Manifest</option></select><button class="secondary" id="refresh">↻ تحديث</button></div><div id="imp"></div></div>
 <div class="card"><div class="stats"><div class="stat">الإجمالي<b id="tot">0</b></div><div class="stat">تم التوصل به<b id="rec">0</b></div><div class="stat">المتبقي<b id="rem">0</b></div></div></div>
 <div class="card"><div class="row"><input id="search" placeholder="بحث بالباركود أو الاسم أو الهاتف أو المدينة..." style="flex:1"><button id="scan">📷 مسح الباركود</button></div><div id="reader"></div><div id="scanmsg"></div></div>
-<div class="card"><div style="overflow:auto"><table><thead><tr><th>الباركود</th><th>الاسم</th><th>الهاتف</th><th>المدينة</th><th>السعر</th><th>الحالة</th><th>استلام</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+<div class="card"><div style="overflow:auto"><table><thead><tr>
+<th>Tracking</th><th>Type</th><th>Store</th><th>Designation & Quantity</th><th>Price</th><th>Address</th><th>City</th><th>Name</th><th>Phone</th><th>Status</th><th>استلام</th>
+</tr></thead><tbody id="rows"></tbody></table></div></div>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script><script src="https://unpkg.com/html5-qrcode"></script><script>
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-const API="https://script.google.com/macros/s/AKfycbylzGsRgy7bR1kZUzcl85r40oi8rh2-y12CRlBpPvpRfn4e4YKuZ4DSE5QGqlJUbl_s/exec",KEY="barcode_commands_v6";let ms=JSON.parse(localStorage.getItem(KEY)||"[]"),cur=null,scanner=null;
+const API="https://script.google.com/macros/s/AKfycbylzGsRgy7bR1kZUzcl85r40oi8rh2-y12CRlBpPvpRfn4e4YKuZ4DSE5QGqlJUbl_s/exec",KEY="barcode_commands_v7";let ms=JSON.parse(localStorage.getItem(KEY)||"[]"),cur=null,scanner=null;
 const $=x=>document.getElementById(x),esc=x=>String(x??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 function save(){localStorage.setItem(KEY,JSON.stringify(ms))}function msg(id,t,c){$(id).innerHTML=t?`<div class="status ${c}">${t}</div>`:""}
 function beep(type){try{let C=AudioContext||webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=type=="good"?880:type=="repeat"?520:220;g.gain.value=.0001;o.connect(g);g.connect(c.destination);g.gain.exponentialRampToValueAtTime(.18,c.currentTime+.02);g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+(type=="good"?.28:.45));o.start();o.stop(c.currentTime+(type=="good"?.3:.48));if(type=="good")setTimeout(()=>{let x=c.createOscillator(),y=c.createGain();x.frequency.value=1175;y.gain.value=.12;x.connect(y);y.connect(c.destination);x.start();x.stop(c.currentTime+.16)},130)}catch(e){}}
 function history(){let s=$("man");s.innerHTML='<option value="">اختر Manifest</option>';ms.forEach(m=>{let o=document.createElement("option");o.value=m.id;o.textContent=m.fileName+" — "+m.orders.length+" طلب";s.appendChild(o)})}
-function render(){let a=cur?.orders||[],q=$("search").value.toLowerCase(),b=a.filter(o=>(o.barcode+" "+o.name+" "+o.phone+" "+o.city+" "+o.address).toLowerCase().includes(q)),r=a.filter(o=>o.received).length;$("tot").textContent=a.length;$("rec").textContent=r;$("rem").textContent=a.length-r;$("rows").innerHTML=b.map(o=>`<tr class="${o.received?"received":""}"><td><b>${esc(o.barcode)}</b></td><td>${esc(o.name)}</td><td>${esc(o.phone)}</td><td>${esc(o.city)}</td><td>${esc(o.price)}</td><td>${esc(o.status)}</td><td><button class="${o.received?"secondary":""}" onclick="toggle('${encodeURIComponent(o.barcode)}')">${o.received?"تم التوصل به":"استلام"}</button></td></tr>`).join("")}
+
+function render(){
+  let a=cur?.orders||[],q=$("search").value.toLowerCase();
+  let b=a.filter(o=>(o.barcode+" "+o.name+" "+o.phone+" "+o.city+" "+o.address+" "+o.store+" "+o.type+" "+o.product+" "+o.status).toLowerCase().includes(q));
+  let r=a.filter(o=>o.received).length;
+  $("tot").textContent=a.length; $("rec").textContent=r; $("rem").textContent=a.length-r;
+  $("rows").innerHTML=b.map(o=>`
+    <tr class="${o.received?"received":""}">
+      <td><b>${esc(o.barcode)}</b></td>
+      <td>${esc(o.type)}</td>
+      <td>${esc(o.store)}</td>
+      <td>${esc(o.product)}</td>
+      <td>${esc(o.price)}</td>
+      <td>${esc(o.address)}</td>
+      <td>${esc(o.city)}</td>
+      <td>${esc(o.name)}</td>
+      <td>${esc(o.phone)}</td>
+      <td>${esc(o.status)}</td>
+      <td><button class="${o.received?"secondary":""}" onclick="toggle('${encodeURIComponent(o.barcode)}')">${o.received?"تم التوصل به":"استلام"}</button></td>
+    </tr>
+  `).join("");
+}
+
 window.toggle=e=>{let o=cur.orders.find(x=>x.barcode==decodeURIComponent(e));o.received=!o.received;o.receivedAt=o.received?new Date().toISOString():"";if(o.received)beep("good");save();render();sync(o)}
 function sync(o){if(API.startsWith("PASTE_"))return;fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"receipt",manifestId:cur.id,barcode:o.barcode,received:o.received,receivedAt:o.receivedAt})}).catch(()=>{})}
 async function pdftext(data){let p=await pdfjsLib.getDocument({data}).promise,t="";for(let i=1;i<=p.numPages;i++){let c=await (await p.getPage(i)).getTextContent();t+=" "+c.items.map(x=>x.str).join(" ")}return t}
-function parse(t){let z=[...t.matchAll(/\bS[A-Z0-9]{7,10}T\b/g)],out=[],seen=new Set();for(let i=0;i<z.length;i++){let bc=z[i][0];if(seen.has(bc))continue;seen.add(bc);let s=t.slice(z[i].index+bc.length,i+1<z.length?z[i+1].index:t.length).replace(/\s+/g," ").trim(),ph=(s.match(/(?:0|\+212)\s*[5-7](?:[\s.-]*\d){8}/)||[""])[0].replace(/\s/g,""),city=(["Tiznit","Agadir","Tata","Guelmim","Marrakech","Casablanca","Rabat","Meknes","Fes","Oujda","Essaouira","Taroudant","Inezgane","Ait Melloul","Sidi Ifni"].find(c=>new RegExp("\\b"+c+"\\b","i").test(s))||""),price=(s.match(/(?:^|\s)(\d{1,5}(?:[.,]\d{1,2})?)(?:\s|$)/)||["",""])[1],ar=s.split(/\s+/).filter(x=>/[\u0600-\u06FF]/.test(x));out.push({barcode:bc,type:"",store:"",product:"",quantity:"",price,address:s.slice(0,180),city,name:ar.slice(-3).join(" "),phone:ph,status:(s.match(/En cours de dispatch|Livré|Retour|Annulé/i)||[""])[0],received:false,receivedAt:""})}return out}
+
+function parse(t){
+  let z=[...t.matchAll(/\bS[A-Z0-9]{7,10}T\b/g)],out=[],seen=new Set();
+  for(let i=0;i<z.length;i++){
+    let bc=z[i][0];
+    if(seen.has(bc))continue;
+    seen.add(bc);
+    let s=t.slice(z[i].index+bc.length,i+1<z.length?z[i+1].index:t.length).replace(/\s+/g," ").trim();
+    let ph=(s.match(/(?:0|\+212)\s*[5-7](?:[\s.-]*\d){8}/)||[""])[0].replace(/\s/g,"");
+    let city=(["Tiznit","Agadir","Tata","Guelmim","Marrakech","Casablanca","Rabat","Meknes","Fes","Oujda","Essaouira","Taroudant","Inezgane","Ait Melloul","Sidi Ifni"].find(c=>new RegExp("\\b"+c+"\\b","i").test(s))||"");
+    let price=(s.match(/(?:^|\s)(\d{1,5}(?:[.,]\d{1,2})?)(?:\s|$)/)||["",""])[1];
+    let ar=s.split(/\s+/).filter(x=>/[\u0600-\u06FF]/.test(x));
+    
+    // تخصيص البيانات للأعمدة العشرة بدقة
+    out.push({
+      barcode: bc,                                    // 1. Tracking
+      type: "",                                       // 2. Type
+      store: "",                                      // 3. Store
+      product: s.slice(0, 100),                       // 4. Designation & Quantity
+      price: price,                                   // 5. Price
+      address: s.slice(0, 180),                       // 6. Address
+      city: city,                                     // 7. City
+      name: ar.slice(-3).join(" "),                   // 8. Name
+      phone: ph,                                      // 9. Phone
+      status: (s.match(/En cours de dispatch|Livré|Retour|Annulé/i)||[""])[0], // 10. Status
+      received: false,
+      receivedAt: ""
+    });
+  }
+  return out;
+}
+
 $("pdf").onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let orders=parse(await pdftext(await f.arrayBuffer()));if(!orders.length)throw Error("لم يتم العثور على Tracking");cur={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),fileName:f.name,uploadedAt:new Date().toISOString(),orders};ms.unshift(cur);save();history();$("man").value=cur.id;render();msg("imp","تم استيراد "+orders.length+" طلب.","ok");if(!API.startsWith("PASTE_"))fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"import",manifest:cur})})}catch(e){msg("imp",esc(e.message),"err")}};
 $("man").onchange=()=>{cur=ms.find(x=>x.id==$("man").value)||null;render()};$("search").oninput=render;$("refresh").onclick=history;
 $("scan").onclick=async()=>{if(scanner){await scanner.stop().catch(()=>{});scanner=null;$("reader").innerHTML="";$("scan").textContent="📷 مسح الباركود";return}scanner=new Html5Qrcode("reader");try{await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:140}},scanCode,()=>{});$("scan").textContent="⏹ إيقاف الكاميرا"}catch(e){scanner=null;msg("scanmsg","تعذر تشغيل الكاميرا. استخدم HTTPS واسمح بالكاميرا.","err")}};

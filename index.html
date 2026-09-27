@@ -1,7 +1,7 @@
 <!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Barcode Commands</title>
 <style>body{font-family:Arial;margin:0;background:#f4f7fb;color:#172033}.wrap{max-width:1100px;margin:auto;padding:15px}.card{background:white;border:1px solid #ddd;border-radius:14px;padding:15px;margin:12px 0}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}button,.file{background:#1769aa;color:white;border:0;border-radius:9px;padding:11px 14px;cursor:pointer;font-weight:bold}.secondary{background:#e8eef5;color:#243447}input,select{padding:11px;border:1px solid #ccd5e0;border-radius:9px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{text-align:center;background:#f7f9fc;padding:12px;border-radius:10px}.stat b{display:block;font-size:24px}#reader{max-width:480px;margin:12px auto}.status{padding:10px;border-radius:9px;margin-top:8px}.ok{background:#e8f8ee;color:#176b37}.warn{background:#fff4d6;color:#805c00}.err{background:#fdeaea;color:#a02020}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #eee;text-align:right}.received{background:#e8f8ee}@media(max-width:650px){.stats{grid-template-columns:1fr}table{font-size:12px}}</style></head>
-<body><header><div class="wrap"><h1>📦 Barcode Commands</h1><small>مزامنة سحابية مع Google Sheets</small></div></header><main class="wrap">
-<div class="card"><div class="row"><label class="file">📄 استيراد PDF<input id="pdf" type="file" accept="application/pdf" hidden></label><select id="man"><option value="">اختر Manifest</option></select><button class="secondary" id="refresh">↻ تحديث من السحابة</button></div><div id="imp"></div></div>
+<body><header><div class="wrap"><h1>📦 Barcode Commands</h1><small>أوراق عمل منفصلة لكل ملف PDF في Google Sheets</small></div></header><main class="wrap">
+<div class="card"><div class="row"><label class="file">📄 استيراد PDF<input id="pdf" type="file" accept="application/pdf" hidden></label><select id="man"><option value="">اختر الملف (Manifest)</option></select><button class="secondary" id="refresh">↻ تحديث من السحابة</button></div><div id="imp"></div></div>
 <div class="card"><div class="stats"><div class="stat">الإجمالي<b id="tot">0</b></div><div class="stat">تم التوصل به<b id="rec">0</b></div><div class="stat">المتبقي<b id="rem">0</b></div></div></div>
 <div class="card"><div class="row"><input id="search" placeholder="بحث بالباركود أو الاسم أو الهاتف أو المدينة..." style="flex:1"><button id="scan">📷 مسح الباركود</button></div><div id="reader"></div><div id="scanmsg"></div></div>
 <div class="card"><div style="overflow:auto"><table><thead><tr>
@@ -11,8 +11,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script><script src="https://unpkg.com/html5-qrcode"></script><script>
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-// ضع رابط الـ Web App الخاص بك هنا بدل النص التوضيحي
-const API="https://script.google.com/macros/s/AKfycbw8IH2dZk-vY8dA4755INt-rWxUSkuqSvH2uxo6zBnibMAVI1SXQ1JOYvMcqR7NTuf9/exec";
+// ضع رابط الـ Web App الخاص بك هنا
+const API="https://script.google.com/macros/s/AKfycbwUvZseAHXr7u05dx54Z8wPF_NpRqrr3czZJZcn3IB8g-1m3MC3-CeIrL4id8EFjjJp/exec";
 
 let ms=[],cur=null,scanner=null;
 const $=x=>document.getElementById(x),esc=x=>String(x??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -49,7 +49,7 @@ function beep(type) {
 }
 
 async function loadFromCloud(){
-  msg("imp","جاري مزامنة الملفات من Google Sheets...","warn");
+  msg("imp","جاري جلب الملفات من Google Sheets...","warn");
   try {
     let res = await fetch(API);
     let data = await res.json();
@@ -59,6 +59,8 @@ async function loadFromCloud(){
       if(!cur) { $("man").value = ms[0].id; cur = ms[0]; }
       else { let exists = ms.find(x=>x.id==cur.id); if(exists) cur = exists; else { $("man").value = ms[0].id; cur = ms[0]; } }
       render();
+    } else {
+      cur = null; render();
     }
     msg("imp","","ok");
   } catch(e) {
@@ -69,11 +71,11 @@ async function loadFromCloud(){
 function history(){
   let s=$("man");
   let curVal = cur ? cur.id : s.value;
-  s.innerHTML='<option value="">اختر Manifest</option>';
+  s.innerHTML='<option value="">اختر الملف (Manifest)</option>';
   ms.forEach(m=>{
     let o=document.createElement("option");
     o.value=m.id;
-    o.textContent=m.fileName+" — "+m.orders.length+" طلب";
+    o.textContent=m.fileName+" — ("+m.orders.length+" طلب)";
     s.appendChild(o);
   });
   if(curVal) s.value = curVal;
@@ -166,17 +168,17 @@ $("pdf").onchange=async e=>{
   let f=e.target.files[0];
   if(!f)return;
   try{
-    msg("imp","جاري تحليل ورفع الملف إلى جوجل شيت...","warn");
+    msg("imp","جاري إنشاء ورقة عمل مستقلة ورفع الملف إلى Google Sheets...","warn");
     let orders=parse(await pdftext(await f.arrayBuffer()));
     if(!orders.length)throw Error("لم يتم العثور على Tracking");
     cur={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),fileName:f.name,uploadedAt:new Date().toISOString(),orders};
-    ms.unshift(cur);
-    history();
-    $("man").value=cur.id;
-    render();
     
     await fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"import",manifest:cur})});
-    msg("imp","تم رفع واستيراد "+orders.length+" طلب إلى جوجل شيت بنجاح.","ok");
+    
+    await loadFromCloud();
+    $("man").value=cur.id;
+    render();
+    msg("imp","تم رفع الملف وإنشاء ورقة عمل خاصة به بنجاح برصيد "+orders.length+" طلب.","ok");
   }catch(e){msg("imp",esc(e.message),"err")}
 };
 
@@ -203,7 +205,7 @@ function scanCode(code){
   getAudioContext();
   let bc=String(code).trim().toUpperCase();
   if(scanner){scanner.stop().catch(()=>{});scanner=null;$("reader").innerHTML="";$("scan").textContent="📷 مسح الباركود";}
-  if(!cur){beep("error");msg("scanmsg","اختر Manifest أولاً.","err");return;}
+  if(!cur){beep("error");msg("scanmsg","اختر الملف أولاً.","err");return;}
   let o=cur.orders.find(x=>x.barcode.toUpperCase()==bc);
   if(!o){beep("error");msg("scanmsg","❌ الباركود <b>"+esc(bc)+"</b> غير موجود.","err");return;}
   if(o.received){beep("repeat");msg("scanmsg","⚠️ هذا الطلب تم تسجيله مسبقاً كمستلم.","warn");return;}
@@ -214,6 +216,5 @@ function scanCode(code){
   msg("scanmsg","✅ تم التوصل بالطلب <b>"+esc(bc)+"</b>","ok");
 }
 
-// تحميل البيانات عند فتح الصفحة أول مرة
 loadFromCloud();
 </script></body></html>

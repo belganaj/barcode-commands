@@ -11,7 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script><script src="https://unpkg.com/html5-qrcode"></script><script>
 pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-const API="https://script.google.com/macros/s/AKfycbzoxNV62fniIeEX4vBhACmrUZz9x5jD9E96FzKRR6cmtPH-vypQLKcCloHUX0TSGXr1/exec";
+const API="https://script.google.com/macros/s/AKfycbzfN3AE8O_9UvPOLHqeouZHpurOmNCAEx1J9HPWlp5GrcMzOoaVKOkaBc_P3Z2FcwU3/exec";
 
 let ms=[],cur=null,scanner=null;
 const $=x=>document.getElementById(x),esc=x=>String(x??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -128,34 +128,48 @@ async function pdftext(data){
 }
 
 function parse(t){
-  let z=[...t.matchAll(/\bS[A-Z0-9]{6,12}\b/g)],out=[],seen=new Set();
+  // استخراج أرقام التتبع (Tracking Barcodes) بدقة أكبر
+  let z=[...t.matchAll(/\b[A-Z0-9]{8,14}\b/g)],out=[],seen=new Set();
   for(let i=0;i<z.length;i++){
     let bc=z[i][0];
-    if(seen.has(bc))continue;
+    // تجاهل الرموز القصيرة أو المتكررة التي ليست تتبعاً حقيقياً
+    if(bc.length < 7 || seen.has(bc)) continue;
     seen.add(bc);
+    
     let s=t.slice(z[i].index+bc.length,i+1<z.length?z[i+1].index:t.length).replace(/\s+/g," ").trim();
     
-    let phMatch = s.match(/(?:0|\+212)\s*[5-7](?:\s*\d){8}/);
+    // البحث الشامل عن رقم الهاتف (المغرب أو دولي أو أرقام تبدأ بـ 05/06/07)
+    let phMatch = s.match(/(?:(?:\+|00)\d{1,3}[\s-]?)?(?:0|\+?212)?\s*[5-7]\d{8}\b/);
     let ph = phMatch ? phMatch[0].replace(/\s/g,"") : "";
     
-    let cities = ["Tiznit","Agadir","Tata","Guelmim","Marrakech","Casablanca","Rabat","Meknes","Fes","Oujda","Essaouira","Taroudant","Inezgane","Ait Melloul","Sidi Ifni","Mirleft"];
+    // قائمة شاملة للمدن المغربية ومدن التوصيل الشائعة
+    let cities = ["Tiznit","Agadir","Tata","Guelmim","Marrakech","Casablanca","Rabat","Meknes","Fes","Oujda","Essaouira","Taroudant","Inezgane","Ait Melloul","Sidi Ifni","Mirleft","Dakhla","Laayoune","Kenitra","Tetouan","Tangier","Salé","Beni Mellal","El Jadida","Nador","Settat","Berrechid","Khemisset","Inzegane"];
     let city = cities.find(c => new RegExp("\\b"+c+"\\b","i").test(s)) || "";
     
-    let priceMatch = s.match(/(\d{1,5}[.,]\d{2})\s+\d/);
-    let price = priceMatch ? priceMatch[1] : ((s.match(/(?:^|\s)(\d{1,4}[.,]\d{2})(?:\s|$)/) || [])[1] || "");
+    // استخراج السعر (الذي عادة ما يتبع بعملة أو بصيغة رقمية عشرية)
+    let priceMatch = s.match(/(\d{1,5}[.,]\d{2})/);
+    let price = priceMatch ? priceMatch[1] : "";
 
-    let statusMatch = s.match(/En cours de dispatch|Livré|Retour|Annulé/i);
+    // حالات التوصيل
+    let statusMatch = s.match(/En cours de dispatch|Livré|Retour|Annulé|Pending|Delivered/i);
     let status = statusMatch ? statusMatch[0] : "";
 
+    // استخراج اسم العميل (الكلمات العربية أو الحروف الأجنبية التي تمثل الاسم)
     let arWords = s.split(/\s+/).filter(x => /[\u0600-\u06FF]/.test(x));
     let name = arWords.length > 0 ? arWords.slice(-2).join(" ") : "";
+    if(!name) {
+      // إذا لم يوجد اسم عربي، نحاول التقاط أول كلمتين بعد الباركود
+      let words = s.split(" ").filter(w => w.length > 2 && !w.includes(ph) && !w.includes(price));
+      name = words.slice(0, 2).join(" ");
+    }
 
+    // تفاصيل المنتج
     let product = s.replace(bc, "").replace(ph, "").replace(city, "").replace(price, "").replace(status, "").replace(name, "").replace(/\s+/g, " ").trim();
-    if(product.length > 80) product = product.slice(0, 80);
+    if(product.length > 100) product = product.slice(0, 100);
 
     out.push({
-      barcode: bc, type: "TLN", store: "OSOGOLD", product: product, price: price,
-      address: s.slice(0, 100), city: city, name: name, phone: ph, status: status,
+      barcode: bc, type: "TLN", store: "OSOGOLD", product: product || "منتج عام", price: price,
+      address: s.slice(0, 120), city: city, name: name || "عميل", phone: ph, status: status,
       received: false, receivedAt: ""
     });
   }
@@ -167,9 +181,9 @@ $("pdf").onchange=async e=>{
   let f=e.target.files[0];
   if(!f)return;
   try{
-    msg("imp","جاري رفع الملف وإنشاء ورقة عمل مستقلة...","warn");
+    msg("imp","جاري تحليل ورفع الملف إلى Google Sheets...","warn");
     let orders=parse(await pdftext(await f.arrayBuffer()));
-    if(!orders.length)throw Error("لم يتم العثور على Tracking");
+    if(!orders.length)throw Error("لم يتم العثور على أرقام التتبع (Tracking)");
     cur={id:Date.now()+"_"+Math.random().toString(36).slice(2,6),fileName:f.name,uploadedAt:new Date().toISOString(),orders};
     
     await fetch(API,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"import",manifest:cur})});
@@ -177,7 +191,7 @@ $("pdf").onchange=async e=>{
     await loadFromCloud();
     $("man").value=cur.id;
     render();
-    msg("imp","تمت إضافة الملف بنجاح كوارقة مستقلة وتحديث فهرس Manifests.","ok");
+    msg("imp","تم تحليل ورفع الملف وإنشاء ورقة العمل بنجاح ("+orders.length+" طلب).","ok");
   }catch(e){msg("imp",esc(e.message),"err")}
 };
 
